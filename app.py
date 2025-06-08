@@ -66,11 +66,11 @@ if uploaded_file:
                 else:
                     st.info("Could not generate visualization from prompt.")
 
-            # PDF Report Generation
-            pdf_path = engine.generate_pdf_report()
-            if pdf_path and os.path.exists(pdf_path):
-                with open(pdf_path, "rb") as f:
-                    st.download_button("📄 Download PDF Report", f, file_name="data_analysis_report.pdf")
+            # # PDF Report Generation
+            # pdf_path = engine.generate_pdf_report()
+            # if pdf_path and os.path.exists(pdf_path):
+            #     with open(pdf_path, "rb") as f:
+            #         st.download_button("📄 Download PDF Report", f, file_name="data_analysis_report.pdf")
             # HTML Report Download
             html_content = engine.generate_html_report()
             b64_html = base64.b64encode(html_content.encode('utf-8')).decode()
