@@ -1,4 +1,5 @@
 # File: app.py
+import base64
 import streamlit as st
 import os
 import tempfile
@@ -70,6 +71,11 @@ if uploaded_file:
             if pdf_path and os.path.exists(pdf_path):
                 with open(pdf_path, "rb") as f:
                     st.download_button("📄 Download PDF Report", f, file_name="data_analysis_report.pdf")
+            # HTML Report Download
+            html_content = engine.generate_html_report()
+            b64_html = base64.b64encode(html_content.encode('utf-8')).decode()
+            st.download_button("⬇️ Download HTML Report", data=html_content, file_name="report.html", mime="text/html")
+
 
         except Exception as e:
             st.error(f"Error: {str(e)}")

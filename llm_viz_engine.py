@@ -3,10 +3,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import warnings
 import os
 import json
 import re
@@ -16,16 +12,9 @@ from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
 from dotenv import load_dotenv
 from jinja2 import Template
-import weasyprint
-from scipy import stats
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-# from statsmodels.tsa.seasonal import seasonal_decompose
-import networkx as nx
 from groq import Groq
 
 load_dotenv()
-warnings.filterwarnings('ignore')
 
 class LLMVisualizationEngine:
     def __init__(self, groq_api_key: str = None):
@@ -60,14 +49,14 @@ class LLMVisualizationEngine:
     def create_derived_features(self):
         if self.df is None:
             raise ValueError("No data loaded.")
-
-        for col in self.df.columns:
-            if "birth" in col.lower() or "dob" in col.lower():
-                try:
-                    self.df[col] = pd.to_datetime(self.df[col], errors='coerce')
-                    self.df['age'] = self.df[col].apply(lambda x: datetime.now().year - x.year if pd.notnull(x) else None)
-                    print("🧠 Derived 'age' column from birthdate")
-                except: continue
+        try:
+            dob_cols = [col for col in self.df.columns if 'birth' in col.lower() or 'dob' in col.lower()]
+            for col in dob_cols:
+                self.df[col] = pd.to_datetime(self.df[col], errors='coerce')
+                self.df['age'] = self.df[col].apply(lambda x: datetime.now().year - x.year if pd.notnull(x) else None)
+                print("✅ Derived 'age' column")
+        except Exception as e:
+            print(f"⚠️ Failed to create derived features: {e}")
 
     def profile_data(self) -> Dict[str, Any]:
         profile = {
@@ -194,6 +183,15 @@ class LLMVisualizationEngine:
                 counts.plot(kind='bar')
                 plt.xlabel(col)
                 plt.ylabel('Frequency')
+            elif cfg['type'] == 'line_chart':
+                x, y = cfg['columns'][0], cfg['columns'][1]
+                plt.plot(self.df[x], self.df[y], marker='o')
+                plt.xlabel(x)
+                plt.ylabel(y)
+            elif cfg['type'] == 'pie_chart':
+                data = self.df[cfg['columns'][0]].value_counts().head(5)
+                plt.pie(data, labels=data.index, autopct='%1.1f%%')
+                plt.axis('equal')
             plt.title(cfg['title'])
             plt.tight_layout()
             plt.savefig(chart_filename, dpi=200)
@@ -226,15 +224,41 @@ class LLMVisualizationEngine:
             print(f"❌ Prompt visualization failed: {e}")
         return None
 
-    def generate_pdf_report(self, output_filename: str = "data_analysis_report.pdf") -> Optional[str]:
+    def visualize_multiple_from_prompt(self, prompt: str) -> List[str]:
+        try:
+            col_list = ', '.join(self.df.columns)
+            response = self.client.chat.completions.create(
+                model="llama3-8b-8192",
+                messages=[
+                    {"role": "system", "content": "Output a list of chart configs as JSON."},
+                    {"role": "user", "content": f"Columns: {col_list}. Prompt: {prompt}"}
+                ],
+                temperature=0.4,
+                max_tokens=700
+            )
+            content = response.choices[0].message.content
+            match = re.search(r'\[.*\]', content, re.DOTALL)
+            configs = json.loads(match.group()) if match else []
+            return [self.create_visualization(cfg) for cfg in configs if isinstance(cfg, dict)]
+        except Exception as e:
+            print(f"❌ Multiple viz error: {e}")
+            return []
+
+    def generate_html_report(self) -> str:
         html_template = """
-        <html><body><h1>LLM Data Analysis Report</h1>
-        <p>Context: {{ data_context }}</p>
+        <html><body style='font-family:sans-serif;'>
+        <h1 style='color:#007acc;'>📊 LLM Data Report</h1>
+        <p><b>Context:</b> {{ data_context }}</p>
+        <h2>🔍 Insights</h2>
         <ul>{% for i in insights %}<li>{{ i }}</li>{% endfor %}</ul>
+        <h2>📈 Charts</h2>
         {% for viz in visualizations %}
+        <div style='margin-bottom:30px;'>
         <h3>{{ viz.title }}</h3>
-        <img src="data:image/png;base64,{{ viz.image_base64 }}">
-        {% endfor %}</body></html>
+        <img src="data:image/png;base64,{{ viz.image_base64 }}" style="width:80%;">
+        </div>
+        {% endfor %}
+        </body></html>
         """
         viz_data = []
         for i, path in enumerate(self.chart_paths):
@@ -242,10 +266,4 @@ class LLMVisualizationEngine:
                 with open(path, 'rb') as f:
                     b64 = base64.b64encode(f.read()).decode('utf-8')
                     viz_data.append({"title": f"Chart {i+1}", "image_base64": b64})
-        template = Template(html_template)
-        html = template.render(data_context=self.data_context, insights=self.insights, visualizations=viz_data)
-        try:
-            weasyprint.HTML(string=html).write_pdf(output_filename)
-            return output_filename
-        except:
-            return None
+        return Template(html_template).render(data_context=self.data_context, insights=self.insights, visualizations=viz_data)
